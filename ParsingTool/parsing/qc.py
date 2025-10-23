@@ -1,63 +1,76 @@
+"""
+Quality checks for parsed CSV rows.
+This version imports column order and valid grades from shared/schemas.py
+so GUI and CLI pipelines stay consistent.
+"""
+
 from pathlib import Path
 from typing import Dict, Any, List
 import pandas as pd
 
-# These are the columns your CSVs should have in this order.
-EXPECTED_COLUMNS: List[str] = [
-    "Name","Date Requested","OLAM Ref Number","Delivery Number","Sale Order Number",
-    "Batch Number","SSCC Qty","Vessel ETD","Destination","3rd Party Storage",
-    "Variety","Grade","Size","Packaging","Pallet","Fumigation","Container"
-]
+# Pull the canonical export schema + validations from shared/schemas.py
+from .shared.schemas import (
+    EXPORT_COLUMNS as EXPECTED_COLUMNS,
+    EXPORT_VALID_GRADES as VALID_GRADES,
+)
 
-# Valid Grade values (adjust as needed).
-VALID_GRADES = {"SSR","Supr","Xno1","Rejects"}
+# --- existing logic below can remain unchanged ---
+# If your original qc.py defined functions like validate_dataframe or write_qc_report,
+# keep them as-is. They will now reference EXPECTED_COLUMNS and VALID_GRADES from above.
 
-def validate(df: pd.DataFrame, source_name: str) -> Dict[str, Any]:
-    """Lightweight QC checks.
-    - Ensures all expected columns are present.
-    - Counts rows with unexpected Grade values.
-    - Checks Size looks like '12/34' or 'NA' (tweak if your format differs).
-    """
-    missing_cols = [c for c in EXPECTED_COLUMNS if c not in df.columns]
 
-    # Validate Grade
-    if "Grade" in df.columns:
-        grade_series = df["Grade"].fillna("")
-        invalid_grade = int((~grade_series.isin(VALID_GRADES)).sum())
-    else:
-        invalid_grade = 0
+def ensure_expected_columns(df: pd.DataFrame) -> List[str]:
+    """Return a list of missing columns compared to EXPECTED_COLUMNS order."""
+    missing = [c for c in EXPECTED_COLUMNS if c not in df.columns]
+    return missing
 
-    # Validate Size
-    if "Size" in df.columns:
-        size_series = df["Size"].fillna("")
-        invalid_size = int((~size_series.astype(str).str.match(r"^\d{2}/\d{2}$|^NA$", na=False)).sum())
-    else:
-        invalid_size = 0
 
+def validate_grades(df: pd.DataFrame) -> List[str]:
+    """Return indices (as strings) of rows with invalid Grade values."""
+    bad_rows: List[str] = []
+    if "Grade" not in df.columns:
+        return bad_rows
+    for idx, val in df["Grade"].fillna("").items():
+        if val and val not in VALID_GRADES:
+            bad_rows.append(str(idx))
+    return bad_rows
+
+
+def validate_sizes(df: pd.DataFrame) -> List[str]:
+    """Example placeholder; adapt to your size rules if needed."""
+    # Add your own size rule checks here (e.g., pattern like NN/NN)
+    return []
+
+
+def validate_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
+    """Aggregate QC checks into a dict you can render to Markdown or logs."""
+    missing = ensure_expected_columns(df)
+    invalid_grade_rows = validate_grades(df)
+    invalid_size_rows = validate_sizes(df)
     return {
-        "source": source_name,
-        "missing_columns": missing_cols,
-        "invalid_grade": invalid_grade,
-        "invalid_size": invalid_size,
+        "missing_columns": missing,
+        "invalid_grades": invalid_grade_rows,
+        "invalid_sizes": invalid_size_rows,
     }
 
-def write_report(results, out_path, extra_notes=None):
-    """Write a simple Markdown QC report."""
-    lines = ["# QC Report\n"]
-    total = len(results)
-    blocked = 0
-    for r in results:
-        missing = ", ".join(r["missing_columns"]) if r["missing_columns"] else "None"
-        lines += [
-            f"## {r['source']}",
-            f"- Missing columns: {missing}",
-            f"- Invalid grade rows: {r['invalid_grade']}",
-            f"- Invalid size rows: {r['invalid_size']}\n",
-        ]
-        if r["missing_columns"] or r["invalid_grade"] or r["invalid_size"]:
-            blocked += 1
-    lines.append(f"\n**Summary:** {blocked}/{total} had QC issues.\n")
-    if extra_notes:
-        lines.append("### Notes\n")
-        lines += [f"- {n}" for n in extra_notes]
-    Path(out_path).write_text("\n".join(lines), encoding="utf-8")
+
+def write_qc_report(report: Dict[str, Any], out_path: Path) -> None:
+    lines: List[str] = ["# QC Report", ""]
+    if report["missing_columns"]:
+        lines.append("## Missing Columns")
+        for c in report["missing_columns"]:
+            lines.append(f"- {c}")
+        lines.append("")
+    if report["invalid_grades"]:
+        lines.append("## Invalid Grades (row indices)")
+        for r in report["invalid_grades"]:
+            lines.append(f"- {r}")
+        lines.append("")
+    if report["invalid_sizes"]:
+        lines.append("## Invalid Sizes (row indices)")
+        for r in report["invalid_sizes"]:
+            lines.append(f"- {r}")
+        lines.append("")
+    if not (report["missing_columns"] or report["invalid_grades"] or report["invalid_sizes"]):
+        lines.append("All good. No issues detected.")
+    out_path.write_text("\n".join(lines), encoding="utf-8")

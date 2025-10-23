@@ -1,46 +1,51 @@
-from pathlib import Path
-import argparse
-import pandas as pd
+import argparse, sys
+from .domestic_zapi.pipeline import run as run_domestic
+try:
+    from .export_orders.pipeline import run as run_export  # type: ignore
+except Exception:
+    run_export = None
 
-from .pdf_parser import parse_pdf
-from .qc import validate, write_report
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="parsingtool", description="Parsing Tool CLI")
+    sub = p.add_subparsers(dest="command")  # not required=True
 
-def parse_one(pdf_path: Path, outdir: Path, debug: bool=False, use_ocr: bool=False) -> Path:
-    df = parse_pdf(pdf_path, debug=debug, use_ocr=use_ocr)
-    # Try to include a useful stem in the filename
-    base = str(df.iloc[0].get("Delivery Number") or "").strip() or pdf_path.stem
-    out = outdir / f"parsed_{base}.csv"
-    outdir.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out, index=False, encoding="utf-8-sig")
-    print(f"[saved] {out}")
-    return out
+    p_dom = sub.add_parser("domestic", help="Parse Domestic ZAPI PDF -> Batches CSV and SSCC CSV")
+    p_dom.add_argument("input_pdf")
+    p_dom.add_argument("--out-batches", required=True)
+    p_dom.add_argument("--out-sscc", required=True)
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description="Parse PDF(s) into CSVs.")
-    ap.add_argument("--file", type=Path, help="Single PDF to parse")
-    ap.add_argument("--folder", type=Path, help="Folder containing PDFs")
-    ap.add_argument("--out", type=Path, required=True, help="Output folder")
-    ap.add_argument("--qc-report", action="store_true", help="Write a QC markdown report")
-    ap.add_argument("--debug", action="store_true")
-    ap.add_argument("--ocr", action="store_true", help="Use OCR fallback (slower)")
-    args = ap.parse_args(argv)
+    p_exp = sub.add_parser("export", help="Parse Export PDF (placeholder)")
+    p_exp.add_argument("input_pdf")
+    p_exp.add_argument("--out", required=True)
+    return p
 
-    if not args.file and not args.folder:
-        ap.error("Provide --file or --folder")
+def main() -> None:
+    parser = build_parser()
 
-    pdfs = [args.file] if args.file else sorted(p for p in args.folder.glob("*.pdf"))
-    args.out.mkdir(parents=True, exist_ok=True)
+    # If user ran just `parsingtool`, show help and exit 0
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
 
-    qc_results = []
-    for p in pdfs:
-        csv_path = parse_one(p, args.out, args.debug, args.ocr)
-        df = pd.read_csv(csv_path, dtype=str).fillna("")
-        qc_results.append(validate(df, p.name))
+    # If user ran a single --help/-h, also exit 0
+    if len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"):
+        parser.print_help()
+        sys.exit(0)
 
-    if args.qc-report:
-        report_path = args.out / "qc_report.md"
-        write_report(qc_results, report_path)
-        print(f"[qc] wrote {report_path}")
+    args = parser.parse_args()
+
+    if args.command == "domestic":
+        run_domestic(input_pdf=args.input_pdf, out_batches=args.out_batches, out_sscc=args.out_sscc)
+        return
+
+    if args.command == "export":
+        if run_export is None:
+            raise SystemExit("Export pipeline not yet wired. Add parsing/export_orders/pipeline.py")
+        run_export(input_pdf=args.input_pdf, out=args.out)
+        return
+
+    parser.print_help()
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
