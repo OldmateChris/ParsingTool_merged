@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List, cast
 import pandas as pd
 
 from .qc import EXPECTED_COLUMNS
+from .export_orders.pipeline import FIELD_PATTERNS
 
 # --- Helpers ---------------------------------------------------------------
 
 FLAGS = re.IGNORECASE | re.MULTILINE
 
 
-def _extract_text(pdf_path: Path, debug: bool = False) -> str:
+def _extract_text(pdf_path: Path, debug: bool = False, use_ocr: bool = False) -> str:
     """Pull text from a PDF using lightweight extractors.
 
     We keep this simple: try PyMuPDF (fast, often accurate) then PyPDF2.
@@ -26,7 +27,7 @@ def _extract_text(pdf_path: Path, debug: bool = False) -> str:
         import fitz  # PyMuPDF
 
         with fitz.open(str(pdf_path)) as doc:
-            pages = [page.get_text() or "" for page in doc]
+            pages = cast(List[str], [page.get_text() or "" for page in doc])
         text = "\n".join(pages)
         if debug:
             print("[info] Extracted text with PyMuPDF")
@@ -47,61 +48,6 @@ def _extract_text(pdf_path: Path, debug: bool = False) -> str:
                 print(f"[warn] PyPDF2 failed: {e2}")
             text = ""
 
-    # Normalise newlines for consistent line-based matching
-    return text.replace("\r\n", "\n").replace("\r", "\n")
-
-
-def _find_line(pattern: str, text: str) -> str:
-    """Return the first capture group on the matching *line*.
-
-    - Uses MULTILINE mode so ^ and $ mean start/end *of line*.
-    - Captures everything up to the newline (no greedy cross-line issues).
-    """
-    m = re.search(pattern, text, FLAGS)
-    return m.group(1).strip() if m else ""
-
-
-def _parse_fields(text: str) -> Dict[str, Any]:
-    """Simple label-aware regex extraction. Tune patterns as needed.
-
-    We look for lines like:
-        Label: value
-    and capture everything to the end of that line.
-    """
-    # Common token class for 'rest of line'
-    LINE = r"([^\n]+)"
-
-    return {
-        "Name": _find_line(rf"^\s*Name[:\s]+{LINE}$", text),
-        "Date Requested": _find_line(r"^\s*Date\s*Requested[:\s]+([\d\-/]+)$", text),
-        "Delivery Number": _find_line(r"^\s*Delivery\s*Number[:\s]+([\w-]+)$", text),
-        "Sale Order Number": _find_line(r"^\s*Sale\s*Order\s*Number[:\s]+([\w-]+)$", text),
-        "Batch Number": _find_line(r"^\s*Batch\s*Number[:\s]+([\w-]+)$", text),
-        "SSCC Qty": _find_line(r"^\s*SSCC\s*Qty[:\s]+([\w-]+)$", text),
-        "Vessel ETD": _find_line(r"^\s*Vessel\s*ETD[:\s]+([\w\-/]+)$", text),
-        "Destination": _find_line(rf"^\s*Destination[:\s]+{LINE}$", text),
-        "3rd Party Storage": _find_line(rf"^\s*3rd\s*Party\s*Storage[:\s]+{LINE}$", text),
-        "Variety": _find_line(rf"^\s*Variety[:\s]+{LINE}$", text),
-        "Grade": _find_line(r"^\s*Grade[:\s]+([\w]+)$", text),
-        "Size": _find_line(r"^\s*Size[:\s]+([\w/]+)$", text),
-        "Packaging": _find_line(rf"^\s*Packaging[:\s]+{LINE}$", text),
-        "Pallet": _find_line(r"^\s*Pallet[:\s]+([\w-]+)$", text),
-        "Fumigation": _find_line(rf"^\s*Fumigation[:\s]+{LINE}$", text),
-        "Container": _find_line(r"^\s*Container[:\s]+([\w-]+)$", text),
-    }
-
-
-# --- Public API ------------------------------------------------------------
-
-def parse_pdf(pdf_path: Path | str, debug: bool = False, use_ocr: bool = False) -> pd.DataFrame:
-    """Parse a single PDF into a one-row DataFrame using EXPECTED_COLUMNS.
-
-    This intentionally starts simple so you can gain confidence quickly.
-    Improve the regexes over time as you see real-world cases.
-    """
-    pdf_path = Path(pdf_path)
-    text = _extract_text(pdf_path, debug=debug)
-
     # Optional OCR fallback (only if extraction gave nothing)
     if use_ocr and not text.strip():
         try:
@@ -117,9 +63,35 @@ def parse_pdf(pdf_path: Path | str, debug: bool = False, use_ocr: bool = False) 
             if debug:
                 print(f"[warn] OCR failed: {e}")
 
+    # Normalise newlines for consistent line-based matching
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _find_line(pattern: str, text: str) -> str:
+    """Return the first capture group on the matching *line*."""
+    m = re.search(pattern, text, FLAGS)
+    return m.group(1).strip() if m else ""
+
+
+def _parse_fields(text: str) -> Dict[str, Any]:
+    """Use the canonical FIELD_PATTERNS from export_orders.pipeline."""
+    return {key: _find_line(pattern, text) for key, pattern in FIELD_PATTERNS.items()}
+
+
+# --- Public API ------------------------------------------------------------
+
+
+def parse_pdf(pdf_path: Path | str, debug: bool = False, use_ocr: bool = False) -> pd.DataFrame:
+    """Parse a single PDF into a one-row DataFrame using EXPECTED_COLUMNS.
+
+    This intentionally starts simple so you can gain confidence quickly.
+    Improve the regexes over time as you see real-world cases.
+    """
+    pdf_path = Path(pdf_path)
+    text = _extract_text(pdf_path, debug=debug, use_ocr=use_ocr)
+
     fields = _parse_fields(text)
 
     # Create a one-row DataFrame with stable column order
     row = [fields.get(c, "") for c in EXPECTED_COLUMNS]
     return pd.DataFrame([row], columns=EXPECTED_COLUMNS)
-

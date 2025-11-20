@@ -1,9 +1,6 @@
 import argparse, sys
 from .domestic_zapi.pipeline import run as run_domestic
-try:
-    from .export_orders.pipeline import run as run_export  # type: ignore
-except Exception:
-    run_export = None
+from .export_orders.pipeline import run as run_export
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="parsingtool", description="Parsing Tool CLI")
@@ -39,10 +36,9 @@ def main() -> None:
         return
 
     if args.command == "export":
-        if run_export is None:
-            raise SystemExit("Export pipeline not yet wired. Add parsing/export_orders/pipeline.py")
         run_export(input_pdf=args.input_pdf, out=args.out)
-        return
+    return
+
 
     parser.print_help()
     sys.exit(0)

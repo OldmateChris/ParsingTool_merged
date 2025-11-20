@@ -13,7 +13,8 @@ from ..shared.schemas import BATCHES_COLUMNS, SSCC_COLUMNS
 # -----------------------------
 HEADER_PATTERNS = {
     "delivery": r"\bDelivery\s+([0-9]{6,})\b",
-    "picking": r"\bPicking\s*request\s*([0-9]{6,})\b",
+    # more forgiving: allow optional colon and flexible spaces
+    "picking": r"Picking\s*request[:\s]*([0-9]{5,})",
     "olam": r"\bOlam\s*Reference\s*([0-9A-Z-/]+)\b",
     "customer_delivery_date": r"\bCustomer\s*Delivery\s*Date\s*([0-9./-]{8,10})\b",
     "plant_storage": r"\bPlant/Storage\s*location\s*([A-Z0-9/]+)\b",
@@ -73,13 +74,29 @@ def _parse_headers(text: str) -> Dict[str, str]:
         if re.search(r"\b(Pty|Limited|Ltd|Pty Ltd|Pty\.|Ltd\.)\b", ln):
             customer = ln.strip()
             for follow in take_around(i + 1, all_lines, before=0, after=4):
-                if re.search(r"(Delivery|Olam|Picking|Plant/Storage|Gross\s*weight)", follow, re.IGNORECASE):
+                # Stop when we hit another header/label
+                if re.search(r"(Delivery|Olam|Picking|Plant/Storage|Gross\s*weight)",
+                             follow, re.IGNORECASE):
                     break
                 if follow:
-                    address_parts.append(follow)
+                    address_parts.append(follow.strip())
             break
+
+    # Post-filter address parts to drop noise like 'Ship-to party' and numeric plant codes
+    cleaned_parts: List[str] = []
+    for part in address_parts:
+        clean = part.strip()
+        if not clean:
+            continue
+        lower = clean.lower()
+        if "ship-to party" in lower:
+            continue
+        if clean.isdigit():
+            continue
+        cleaned_parts.append(clean)
+
     h["Customer"] = customer
-    h["Customer/Delivery Address"] = ", ".join(address_parts)
+    h["Customer/Delivery Address"] = ", ".join(cleaned_parts)
     return h
 
 
@@ -88,7 +105,7 @@ def _parse_headers(text: str) -> Dict[str, str]:
 # -----------------------------
 
 def _parse_batches_and_sscc(text: str) -> List[dict]:
-    """Return a list of dict blocks with: Batch_Number, pal_text, sscc_list, product_lines."""
+    """Return a list of dict blocks with: Batch_Number, sscc_list, product_lines."""
     ls = lines(text)
     blocks: List[dict] = []
 
@@ -98,34 +115,36 @@ def _parse_batches_and_sscc(text: str) -> List[dict]:
             continue
         batch = m.group(1)
 
-        # X PAL on same or nearby lines
-        pal_text = ""
-        m_pal = PAL_RE.search(ln)
-        if not m_pal:
-            for near in take_around(idx, ls, before=0, after=3):
-                m_pal = PAL_RE.search(near)
-                if m_pal:
-                    break
-        if m_pal:
-            pal_text = f"{m_pal.group(1)} PAL"
-
         # Collect subsequent lines until next batch or a reasonable window
         ssccs: List[str] = []
         product_lines: List[str] = []
+
         for j in range(idx + 1, min(idx + 60, len(ls))):
             nxt = ls[j]
+
+            # Stop when we reach the next batch
             if BATCH_RE.search(nxt):
                 break
-            # SSCCs may appear with or without an 'SSCC:' label
+
+            # Collect SSCC codes (may appear with or without an "SSCC:" label)
             for mss in SSCC_RE.finditer(nxt):
                 ssccs.append(mss.group(1))
-            # Keep candidate product lines: ones containing size/pack/grade tokens
-            if SIZE_RE.search(nxt) or PACK_RE.search(nxt) or GRADE_TOKEN_RE.search(nxt):
+
+            # Skip lines that are clearly summary / header lines, not product lines
+            if re.search(r"Gross\s*weight", nxt, flags=re.IGNORECASE):
+                continue
+
+            # Skip obvious SSCC label lines – they are not product descriptions.
+            if re.match(r"\s*SSCC\b", nxt, flags=re.IGNORECASE):
+                continue
+
+            # Keep lines that *look* like actual product descriptions.
+            # They must contain a size (e.g. 27/30) or a pack (e.g. 850KG, 1T, 25KG ctn).
+            if SIZE_RE.search(nxt) or PACK_RE.search(nxt):
                 product_lines.append(nxt)
 
         blocks.append({
             "Batch_Number": batch,
-            "pal_text": pal_text,
             "sscc_list": ssccs,
             "product_lines": product_lines[-4:],  # last few are usually closest to batch
         })
@@ -201,6 +220,12 @@ def _parse_product_fields(product_lines: List[str]) -> dict:
         parts = txt.split(split_anchor, 1)[0].strip()
         variety = re.sub(r"\s+", " ", parts)
 
+        # If variety starts with a numeric material code (e.g. "26132 Alm Kern WC"),
+        # drop the leading number and keep just the description.
+        m_var = re.match(r"^\d+\s+(.*)$", variety)
+        if m_var:
+            variety = m_var.group(1)
+
     return {
         "Variety": variety,
         "Grade": grade,
@@ -226,17 +251,29 @@ def run(*, input_pdf: str, out_batches: str, out_sscc: str) -> None:
     batch_rows: List[Dict[str, str]] = []
     sscc_rows: List[Dict[str, str]] = []
 
+    # Remember the last non-empty product fields so we can reuse them
+    last_prod = {"Variety": "", "Grade": "", "Size": "", "Packaging": ""}
+
     for b in blocks:
-        prod = _parse_product_fields(b.get("product_lines", []))
+        product_lines = b.get("product_lines", [])
+        prod = _parse_product_fields(product_lines)
         ssccs = b.get("sscc_list", [])
 
-        # SSCC Qty rule: only set "X PAL" if matches count
-        pal_txt = b.get("pal_text", "")
+        # If this batch has no product info at all, reuse the previous one
+        if not any(prod.values()) and any(last_prod.values()):
+            prod = last_prod.copy()
+        else:
+            # Otherwise, if we did find something, update last_prod
+            if any(prod.values()):
+                last_prod = prod.copy()
+
+        # Derive PAL quantity from the product description line(s),
+        # e.g. "Alm Kern WC SSR 27/30 850KG D-Spec  16 PAL"
+        joined_prod = " ".join(product_lines)
         sscc_qty = ""
-        if pal_txt:
-            m = re.search(r"(\d+)\s*PAL", pal_txt, flags=re.IGNORECASE)
-            if m and len(ssccs) == int(m.group(1)):
-                sscc_qty = f"{m.group(1)} PAL"
+        m_pal = re.search(r"(\d+)\s*PAL", joined_prod, flags=re.IGNORECASE)
+        if m_pal:
+            sscc_qty = f"{m_pal.group(1)} PAL"
 
         # Batch row (all columns present; many intentionally blank for override later)
         row = {

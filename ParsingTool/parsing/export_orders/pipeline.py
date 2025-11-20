@@ -39,8 +39,6 @@ def run(*, input_pdf: str, out: str) -> None:
     Export pipeline: parse one Export-style PDF -> one-row CSV with EXPORT_COLUMNS.
     """
     text = extract_text(input_pdf)
-    # normalise newlines in case of CRLF
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
     fields = _parse_fields(text)
 
     row = {col: fields.get(col, "") for col in EXPORT_COLUMNS}

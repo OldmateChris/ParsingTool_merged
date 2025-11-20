@@ -14,9 +14,7 @@ from .shared.schemas import (
     EXPORT_VALID_GRADES as VALID_GRADES,
 )
 
-# --- existing logic below can remain unchanged ---
-# If your original qc.py defined functions like validate_dataframe or write_qc_report,
-# keep them as-is. They will now reference EXPECTED_COLUMNS and VALID_GRADES from above.
+# --- Core QC helpers shared between CLI and GUI ---
 
 
 def ensure_expected_columns(df: pd.DataFrame) -> List[str]:
@@ -37,13 +35,13 @@ def validate_grades(df: pd.DataFrame) -> List[str]:
 
 
 def validate_sizes(df: pd.DataFrame) -> List[str]:
-    """Example placeholder; adapt to your size rules if needed."""
-    # Add your own size rule checks here (e.g., pattern like NN/NN)
+    """Placeholder for size rules; adapt if you add stricter checks."""
+    # Right now this does nothing, but you can plug in your own rules later.
     return []
 
 
 def validate_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
-    """Aggregate QC checks into a dict you can render to Markdown or logs."""
+    """Run all QC checks and return a simple summary dict."""
     missing = ensure_expected_columns(df)
     invalid_grade_rows = validate_grades(df)
     invalid_size_rows = validate_sizes(df)
@@ -55,6 +53,10 @@ def validate_dataframe(df: pd.DataFrame) -> Dict[str, Any]:
 
 
 def write_qc_report(report: Dict[str, Any], out_path: Path) -> None:
+    """Legacy helper: write a QC report for a *single* DataFrame.
+
+    This keeps compatibility if any older code calls write_qc_report directly.
+    """
     lines: List[str] = ["# QC Report", ""]
     if report["missing_columns"]:
         lines.append("## Missing Columns")
@@ -73,4 +75,70 @@ def write_qc_report(report: Dict[str, Any], out_path: Path) -> None:
         lines.append("")
     if not (report["missing_columns"] or report["invalid_grades"] or report["invalid_sizes"]):
         lines.append("All good. No issues detected.")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# --- New GUI-facing wrappers ---
+
+
+def validate(df: pd.DataFrame, source_name: str) -> Dict[str, Any]:
+    """GUI helper: run QC on one parsed PDF and tag it with its source name.
+
+    Parameters
+    ----------
+    df:
+        Parsed rows for a single PDF (one or more rows).
+    source_name:
+        A label for where the data came from (we use the PDF filename).
+
+    Returns
+    -------
+    Dict[str, Any]
+        A dict with the standard QC fields plus a "source" key.
+    """
+    report = validate_dataframe(df)
+    report["source"] = source_name
+    return report
+
+
+def write_report(reports: List[Dict[str, Any]], out_path: Path) -> None:
+    """GUI helper: write one Markdown QC report for many PDFs.
+
+    Parameters
+    ----------
+    reports:
+        A list of dicts as returned by ``validate`` (one per PDF).
+    out_path:
+        Where to write the combined ``qc_report.md`` file.
+    """
+    lines: List[str] = ["# QC Report", ""]
+
+    if not reports:
+        lines.append("No QC data provided.")
+        out_path.write_text("\n".join(lines), encoding="utf-8")
+        return
+
+    for rep in reports:
+        src = rep.get("source", "<unknown source>")
+        lines.append(f"## {src}")
+
+        missing = rep.get("missing_columns", [])
+        bad_grades = rep.get("invalid_grades", [])
+        bad_sizes = rep.get("invalid_sizes", [])
+
+        if missing:
+            lines.append("### Missing Columns")
+            for c in missing:
+                lines.append(f"- {c}")
+        if bad_grades:
+            lines.append("### Invalid Grades (row indices)")
+            for r in bad_grades:
+                lines.append(f"- {r}")
+        if bad_sizes:
+            lines.append("### Invalid Sizes (row indices)")
+            for r in bad_sizes:
+                lines.append(f"- {r}")
+
+        lines.append("")  # blank line between files
+
     out_path.write_text("\n".join(lines), encoding="utf-8")

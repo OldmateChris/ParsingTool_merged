@@ -5,14 +5,20 @@ description = "PDF-to-CSV parsing tool with optional OCR fallback"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "pandas",
-  "pymupdf",
-  "pdfminer.six",
-  "PyPDF2",
-  "pytesseract",
-  "pdf2image",
-  "Pillow",
+    "pandas",
+    "pymupdf",
+    "pdfminer.six",
+    "pypdf",
+    "PyPDF2",
+    "pytesseract",
+    "pdf2image",
+    "Pillow",
+    "pytest",
 ]
+
+# NEW SECTION
+[tool.setuptools]
+packages = ["ParsingTool"]   # this must match the folder name exactly
 
 [project.scripts]
 parsingtool = "ParsingTool.parsing.cli:main"
