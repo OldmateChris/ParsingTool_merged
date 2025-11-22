@@ -267,13 +267,11 @@ def run(*, input_pdf: str, out_batches: str, out_sscc: str) -> None:
             if any(prod.values()):
                 last_prod = prod.copy()
 
-        # Derive PAL quantity from the product description line(s),
-        # e.g. "Alm Kern WC SSR 27/30 850KG D-Spec  16 PAL"
-        joined_prod = " ".join(product_lines)
-        sscc_qty = ""
-        m_pal = re.search(r"(\d+)\s*PAL", joined_prod, flags=re.IGNORECASE)
-        if m_pal:
-            sscc_qty = f"{m_pal.group(1)} PAL"
+        # Derive PAL quantity from SSCC codes (domestic logic)
+        if ssccs:
+            sscc_qty = f"{len(ssccs)} PAL"
+        else:
+            sscc_qty = ""
 
         # Batch row (all columns present; many intentionally blank for override later)
         row = {

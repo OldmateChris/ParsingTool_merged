@@ -20,8 +20,12 @@ dev = [
 ]
 
 [tool.setuptools]
-# Single top-level package called "ParsingTool"
-packages = ["ParsingTool"]
+# Let setuptools automatically find all packages under this folder
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ParsingTool*"]
 
 [project.scripts]
 # CLI: e.g. `parsingtool export input.pdf --out out.csv`

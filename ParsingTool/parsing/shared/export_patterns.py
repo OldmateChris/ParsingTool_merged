@@ -15,22 +15,51 @@ from typing import Dict
 # Matches the rest of a line after the label (non-newline characters)
 LINE = r"([^\n]+)"
 
-# Canonical mapping of field name -> regex pattern
 EXPORT_FIELD_PATTERNS: Dict[str, str] = {
-    "Name": rf"^\s*Name[:\s]+{LINE}$",
-    "Date Requested": r"^\s*Date\s*Requested[:\s]+([\d\-/]+)$",
-    "Delivery Number": r"^\s*Delivery\s*Number[:\s]+([\w-]+)$",
-    "Sale Order Number": r"^\s*Sale\s*Order\s*Number[:\s]+([\w-]+)$",
-    "Batch Number": r"^\s*Batch\s*Number[:\s]+([\w-]+)$",
-    "SSCC Qty": r"^\s*SSCC\s*Qty[:\s]+([\w-]+)$",
-    "Vessel ETD": r"^\s*Vessel\s*ETD[:\s]+([\w\-/]+)$",
-    "Destination": rf"^\s*Destination[:\s]+{LINE}$",
-    "3rd Party Storage": rf"^\s*3rd\s*Party\s*Storage[:\s]+{LINE}$",
-    "Variety": rf"^\s*Variety[:\s]+{LINE}$",
-    "Grade": r"^\s*Grade[:\s]+([\w]+)$",
-    "Size": r"^\s*Size[:\s]+([\w/]+)$",
-    "Packaging": rf"^\s*Packaging[:\s]+{LINE}$",
-    "Pallet": r"^\s*Pallet[:\s]+([\w-]+)$",
-    "Fumigation": rf"^\s*Fumigation[:\s]+{LINE}$",
-    "Container": r"^\s*Container[:\s]+([\w-]+)$",
+    # Optional name line
+    "Name": r"^\s*Name[:\s]+([^\n]+)$",
+
+    # The PDF uses "Date" not always "Date Requested"
+    "Date Requested": r"Date\s*(?:Requested)?[\s:]*([\d./-]+)",
+
+    # OLAM Ref No. / OLAM Ref Number
+    "OLAM Ref Number": r"OLAM\s*Ref\s*(?:No\.?|Number)[\s:]*([\w-]+)",
+
+    # Delivery No. / Delivery Number
+    "Delivery Number": r"Delivery\s*(?:No\.?|Number)[\s:]*([\w-]+)",
+
+    # Sale Order No. / Sale Order Number
+    "Sale Order Number": r"Sale\s*Order\s*No\.?[\s:]*([\w-]+)",
+
+    # Batch number / Batch No. — allow split label + value
+    "Batch Number": r"Batch\s*(?:No\.?|Number)?[\s:]*([\w\-\/]+)",
+    
+    # SSCC quantity
+    "SSCC Qty": r"SSCC\s*Qty[\s:]*([\d,\.]+)",
+
+    # Vessel ETD, allowing for `Vessel ETD\n:\n16.07.2025`
+    "Vessel ETD": r"Vessel\s*ETD[\s:]*([\w\-/\.]+)",
+
+    # Final Destination / Destination
+    "Destination": rf"(?:Final\s+Destination|Destination)[\s:]*{LINE}",
+
+    # 3rd Party Storage text on same line or following line
+    "3rd Party Storage": r"^\s*3rd\s*Party\s*Storage\b[\s:]*([^\n]+)",
+    
+    # Variety / Grade / Size / Packaging / Pallet / Fumigation
+    # These are usually simple labels with text after them
+    "Variety":           r"^\s*Variety\b[\s:]*([^\n]+)",
+    "Grade":             r"^\s*Grade\b[\s:]*([A-Za-z0-9/ +\.-]+)",
+    "Size":              r"^\s*Size\b[\s:]*([A-Za-z0-9/ +\.-]+)",
+    "Packaging":         r"^\s*Packaging\b[\s:]*([^\n]+)",
+    "Pallet":            r"^\s*Pallet\b[\s:]*([A-Za-z0-9\-]+)",
+    "Fumigation":        r"^\s*Fumigation\b[\s:]*([^\n]+)",
+
+
+    # Container Size
+    #   Container Size
+    #   : Container (40ft) X 1 Food Quality
+    "Container": r"Container\s*Size[\s:]*([^\n]+)",
 }
+
+
