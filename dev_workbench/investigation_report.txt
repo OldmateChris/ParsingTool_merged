@@ -1,0 +1,21 @@
+Found 37 failed PDFs (Empty Variety).
+--- First 5 Failed Filenames ---
+0080606564_PI.pdf
+0080606839_ZAPA.pdf
+0080606945_ZAPA.pdf
+0080607083_PI.pdf
+0080607083_ZAPI.pdf
+--------------------------------
+
+Investigating first failure: input\0080606564_PI.pdf
+
+--- FULL RAW TEXT (repr) ---
+'\n'
+
+[!] Text appears empty. This likely indicates a scanned PDF without OCR layer.
+--- END RAW TEXT ---
+
+--- Attempting OCR extraction ---
+OCR Text Length: 2266
+OCR Text Preview (first 500 chars):
+'PACKING INSTRUCTION\n\nOLAM Ref No. 77051\n\nDelivery No. 80606564\n\nSale Order No. 30030981\n\nDate 10.04.2025\n\nPO Number 1441031932\n\nPacker :\n\nSeaway Intermodal Pty Ltd\n\nConsignee : Notify Party\n\nBenns Chocolate Factory Benns Chocolate Factory\nSDN. BHD. SDN. BHD.\n\nLot. No. 1, Jalan CJ 1/6C\nKawasan Perindustrian\nCheras Jaya,Batu 11 Cheras\nSELANGOR DARUL EHSAN\nMALAYSIA\n\nLot. No. 1, Jalan CJ 1/6C\nKawasan Perindustrian\nCheras Jaya,Batu 11 Cheras\nSELANGOR DARUL EHSAN\nMALAYSIA\n\nPort of Loading\nPort of Disc'

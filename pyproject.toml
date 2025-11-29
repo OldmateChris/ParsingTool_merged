@@ -1,0 +1,39 @@
+[project]
+name = "parsingtool"
+version = "0.1.0"
+description = "PDF-to-CSV parsing tool with optional OCR fallback"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "pandas",
+    "pymupdf",      # provides `fitz`
+    "PyPDF2",
+    "pytesseract",
+    "pdf2image",
+    "Pillow",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools]
+# Let setuptools automatically find all packages under this folder
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ParsingTool*"]
+
+[project.scripts]
+# CLI: e.g. `parsingtool export input.pdf --out out.csv`
+parsingtool = "ParsingTool.parsing.cli:main"
+
+# GUI: e.g. `parsingtool-gui` to launch the Tkinter UI
+parsingtool-gui = "ParsingTool.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
