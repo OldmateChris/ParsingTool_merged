@@ -33,8 +33,12 @@ def extract_text(path: str, *, debug: bool = False, use_ocr: bool = False) -> st
             if debug:
                 print(f"[warn] PyPDF2 failed: {e2}")
             text = ""
+    
+    # If we got only a tiny amount of text, treat it as image-only
+    # and run OCR when the user has enabled it.
+    MIN_TEXT_CHARS_FOR_NO_OCR = 200
 
-    if use_ocr and not text.strip():
+    if use_ocr and len(text.strip()) < MIN_TEXT_CHARS_FOR_NO_OCR:
         try:
             from pdf2image import convert_from_path
             import pytesseract

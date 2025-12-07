@@ -2,6 +2,9 @@ from __future__ import annotations
 import re
 from typing import List, Dict
 
+from pathlib import Path          
+import pandas as pd 
+
 from ..shared.pdf_utils import extract_text
 from ..shared.text_utils import lines, find_first, take_around
 from ..shared.date_utils import to_ddmmyyyy
@@ -233,32 +236,34 @@ def _parse_product_fields(product_lines: List[str]) -> dict:
         "Packaging": packaging,
     }
 
-# -----------------------------
-# Public entrypoint
-# -----------------------------
-
-def run(*, input_pdf: str, out_batches: str, out_sscc: str, use_ocr: bool = False, debug: bool = False) -> None:
+def parse_domestic_pdf(
+    pdf_path: str | Path,
+    use_ocr: bool = False,
+    debug: bool = False,
+) -> tuple[list[Dict[str, str]], list[Dict[str, str]]]:
+    """
+    Parse a single domestic PDF and return:
+      - batch_rows: list of dicts for the batches CSV
+      - sscc_rows: list of dicts for the SSCC CSV
+    """
     # 1) Extract text
-    # Build keyword arguments only for options that are actually enabled.
-    # This keeps the function friendly for tests or callers that
-    # replace `extract_text` with a simpler version that only
-    # expects the path argument, while still letting us opt in to OCR.
-    kwargs = {}
+    kwargs: dict = {}
     if use_ocr:
         kwargs["use_ocr"] = True
     if debug:
         kwargs["debug"] = True
-    text = extract_text(input_pdf, **kwargs)
+
+    text = extract_text(str(pdf_path), **kwargs)
 
     # 2) Headers
     H = _parse_headers(text)
     if debug and not H.get("Delivery Number"):
-        print(f"[WARN] {input_pdf}: Could not find 'Delivery Number' using regex.")
+        print(f"[WARN] {pdf_path}: Could not find 'Delivery Number' using regex.")
 
     # 3) Batches & SSCC blocks
     blocks = _parse_batches_and_sscc(text)
     if debug and not blocks:
-        print(f"[WARN] {input_pdf}: No batches found.")
+        print(f"[WARN] {pdf_path}: No batches found.")
 
     # 4) Build rows
     batch_rows: List[Dict[str, str]] = []
@@ -276,7 +281,6 @@ def run(*, input_pdf: str, out_batches: str, out_sscc: str, use_ocr: bool = Fals
         if not any(prod.values()) and any(last_prod.values()):
             prod = last_prod.copy()
         else:
-            # Otherwise, if we did find something, update last_prod
             if any(prod.values()):
                 last_prod = prod.copy()
 
@@ -286,7 +290,7 @@ def run(*, input_pdf: str, out_batches: str, out_sscc: str, use_ocr: bool = Fals
         else:
             sscc_qty = ""
 
-        # Batch row (all columns present; many intentionally blank for override later)
+        # Batch row
         row = {
             "Requested By": "",
             "Date Requested": "",
@@ -310,7 +314,7 @@ def run(*, input_pdf: str, out_batches: str, out_sscc: str, use_ocr: bool = Fals
             "Size": prod.get("Size", ""),
             "Packaging": prod.get("Packaging", ""),
             "Total Gross Weight": H.get("Total Gross Weight", ""),
-            "Pallet": "",  # always blank
+            "Pallet": "",
             "Comments": "",
             "Non-Conformance": "",
         }
@@ -328,6 +332,89 @@ def run(*, input_pdf: str, out_batches: str, out_sscc: str, use_ocr: bool = Fals
                 "Packaging": prod.get("Packaging", ""),
             })
 
-    # 5) Write CSVs
+    return batch_rows, sscc_rows
+
+# -----------------------------
+# Public entrypoints
+# -----------------------------
+
+def run(
+    *,
+    input_pdf: str,
+    out_batches: str,
+    out_sscc: str,
+    use_ocr: bool = False,
+    debug: bool = False,
+) -> None:
+    """
+    Single-file entrypoint (kept for compatibility).
+
+    Uses parse_domestic_pdf() to generate rows, then writes two CSVs.
+    """
+    batch_rows, sscc_rows = parse_domestic_pdf(
+        input_pdf,
+        use_ocr=use_ocr,
+        debug=debug,
+    )
+
     write_csv(out_batches, batch_rows, BATCHES_COLUMNS)
     write_csv(out_sscc, sscc_rows, SSCC_COLUMNS)
+
+def run_batch(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    use_ocr: bool = False,
+    debug: bool = False,
+) -> None:
+    """
+    Batch-process domestic PDFs in `input_dir` and write two combined CSVs
+    to `output_dir`:
+
+      - domestic_batches_combined.csv
+      - domestic_sscc_combined.csv
+    """
+    batches_out = output_dir / "domestic_batches_combined.csv"
+    sscc_out = output_dir / "domestic_sscc_combined.csv"
+
+    pdf_files = sorted(input_dir.glob("*.pdf"))
+    print(f"[DOMESTIC] Found {len(pdf_files)} PDFs in {input_dir}")
+
+    all_batch_rows: list[Dict[str, str]] = []
+    all_sscc_rows: list[Dict[str, str]] = []
+
+    for pdf in pdf_files:
+        try:
+            batch_rows, sscc_rows = parse_domestic_pdf(
+                pdf,
+                use_ocr=use_ocr,
+                debug=debug,
+            )
+
+            # Tag each row with the source file name
+            for row in batch_rows:
+                row["Source_File"] = pdf.name
+            for row in sscc_rows:
+                row["Source_File"] = pdf.name
+
+            all_batch_rows.extend(batch_rows)
+            all_sscc_rows.extend(sscc_rows)
+        except Exception as e:
+            print(f"[DOMESTIC] ERROR processing {pdf.name}: {e}")
+
+    if all_batch_rows:
+        batches_df = pd.DataFrame(all_batch_rows)
+        # Optional: enforce column order, plus Source_File
+        batches_df = batches_df.reindex(columns=BATCHES_COLUMNS + ["Source_File"])
+        batches_df.to_csv(batches_out, index=False)
+        print(f"[DOMESTIC] Wrote combined batches CSV: {batches_out}")
+    else:
+        print("[DOMESTIC] No batch rows collected.")
+
+    if all_sscc_rows:
+        sscc_df = pd.DataFrame(all_sscc_rows)
+        sscc_df = sscc_df.reindex(columns=SSCC_COLUMNS + ["Source_File"])
+        sscc_df.to_csv(sscc_out, index=False)
+        print(f"[DOMESTIC] Wrote combined SSCC CSV: {sscc_out}")
+    else:
+        print("[DOMESTIC] No SSCC rows collected.")

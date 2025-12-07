@@ -61,13 +61,41 @@ def parse_product_line(line: str) -> Dict[str, str]:
         row["Packaging"] = "Bulk Bags"
         remainder = re.sub(r"\bBulk Bags\b", " ", remainder, flags=re.IGNORECASE)
 
+        # 3.5 SPECIAL CASE: Splits & Broken is a Grade
+    splits_pattern = re.compile(r"splits\s*&\s*broken|splits&broken", re.IGNORECASE)
+    if splits_pattern.search(remainder):
+        # Set the grade
+        row["Grade"] = "Splits & Broken"
+        # Remove that phrase from the remainder so Variety is cleaner
+        remainder = splits_pattern.sub(" ", remainder)
+
+        # 3.6 SPECIAL CASE: Mfg Gr is also a Grade
+    mfg_pattern = re.compile(r"\bmfg\s*gr\b", re.IGNORECASE)
+    if mfg_pattern.search(remainder):
+        row["Grade"] = "Mfg Gr"
+        remainder = mfg_pattern.sub(" ", remainder)
+
+        # 3.7 SPECIAL CASE: Satake is a Grade (H&S Satake)
+    satake_pattern = re.compile(r"\bsatake\b", re.IGNORECASE)
+    if satake_pattern.search(remainder):
+        row["Grade"] = "H&S Satake"
+        remainder = satake_pattern.sub(" ", remainder)
+
+    # 3.8 SPECIAL CASE: Helius is a Grade (H&S Helius)
+    helius_pattern = re.compile(r"\bhelius\b", re.IGNORECASE)
+    if helius_pattern.search(remainder):
+        row["Grade"] = "H&S Helius"
+        remainder = helius_pattern.sub(" ", remainder)
+
+
     # 4. PLUCK GRADE
-    for grade in sorted(KNOWN_GRADES, key=len, reverse=True):
-        pattern = r"\b" + re.escape(grade) + r"\b"
-        if re.search(pattern, remainder, re.IGNORECASE):
-            row["Grade"] = grade
-            remainder = re.sub(pattern, " ", remainder, flags=re.IGNORECASE)
-            break 
+    if not row["Grade"]:
+        for grade in sorted(KNOWN_GRADES, key=len, reverse=True):
+            pattern = r"\b" + re.escape(grade) + r"\b"
+            if re.search(pattern, remainder, re.IGNORECASE):
+                row["Grade"] = grade
+                remainder = re.sub(pattern, " ", remainder, flags=re.IGNORECASE)
+                break
 
     # 5. CLEANUP VARIETY
     remainder = re.sub(r"\b\d{2,}\.\d+\.\d+\b", " ", remainder)
@@ -246,3 +274,36 @@ def run(
         write_report(results, report_path)
         if debug:
             print(f"[QC] Report written to {report_path}")
+
+def run_batch(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    use_ocr: bool = False,
+    debug: bool = False,
+) -> None:
+    """
+    Batch-process all export PDFs in `input_dir` and write a single combined CSV
+    to `output_dir/export_combined.csv`.
+    """
+    out_file = output_dir / "export_combined.csv"
+
+    pdf_files = sorted(input_dir.glob("*.pdf"))
+    print(f"[EXPORT] Found {len(pdf_files)} PDFs in {input_dir}")
+
+    all_dfs: list[pd.DataFrame] = []
+    for pdf in pdf_files:
+        try:
+            df = parse_export_pdf(str(pdf), use_ocr=use_ocr, debug=debug)
+            df["Source_File"] = pdf.name
+            all_dfs.append(df)
+        except Exception as e:
+            print(f"[EXPORT] ERROR processing {pdf.name}: {e}")
+
+    if not all_dfs:
+        print("[EXPORT] No data collected.")
+        return
+
+    combined = pd.concat(all_dfs, ignore_index=True)
+    combined.to_csv(out_file, index=False)
+    print(f"[EXPORT] Wrote combined CSV: {out_file}")

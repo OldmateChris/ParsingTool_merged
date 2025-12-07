@@ -1,41 +1,79 @@
-import os
-import glob
-import pandas as pd
-from ParsingTool.parsing.export_orders.pipeline import parse_export_pdf
+from __future__ import annotations
 
-INPUT_DIR = 'input'
-OUTPUT_FILE = 'output/combined_results.csv'
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
 
-def main():
-    pdf_files = glob.glob(os.path.join(INPUT_DIR, '*.pdf'))
-    print(f"Found {len(pdf_files)} PDFs.")
-    
-    all_dfs = []
-    for pdf_file in pdf_files:
-        try:
-            # print(f"Processing {pdf_file}...")
-            df = parse_export_pdf(pdf_file, use_ocr=True)
-            # Add source filename for traceability
-            df['Source_File'] = os.path.basename(pdf_file)
-            all_dfs.append(df)
-        except Exception as e:
-            print(f"Error processing {pdf_file}: {e}")
+BASE_TEST_DIR = Path("pdf_csv_test_folders")
 
-    if not all_dfs:
-        print("No data collected.")
-        return
 
-    combined_df = pd.concat(all_dfs, ignore_index=True)
-    combined_df.to_csv(OUTPUT_FILE, index=False)
-    print(f"Saved combined results to {OUTPUT_FILE}")
+@dataclass
+class ModeConfig:
+    help: str
+    input_subdir: str
+    run_batch: Callable[[Path, Path, bool, bool], None]
 
-    print("\n--- AUDIT RESULTS ---")
-    for col in ['Variety', 'Grade', 'Packaging']:
-        if col in combined_df.columns:
-            print(f"\nValue Counts for '{col}':")
-            print(combined_df[col].value_counts().to_string())
-        else:
-            print(f"\nColumn '{col}' not found in results.")
+
+# --- Thin wrappers that lazy-import the real pipeline code ---
+
+
+def _run_export(input_dir: Path, output_dir: Path, use_ocr: bool, debug: bool) -> None:
+    from ParsingTool.parsing.export_orders.pipeline import run_batch as export_run_batch
+
+    export_run_batch(input_dir, output_dir, use_ocr=use_ocr, debug=debug)
+
+
+def _run_domestic(input_dir: Path, output_dir: Path, use_ocr: bool, debug: bool) -> None:
+    from ParsingTool.parsing.domestic_zapi.pipeline import run_batch as domestic_run_batch
+
+    domestic_run_batch(input_dir, output_dir, use_ocr=use_ocr, debug=debug)
+
+
+def _run_pi(input_dir: Path, output_dir: Path, use_ocr: bool, debug: bool) -> None:
+    from ParsingTool.parsing.packing_list.pipeline import run_batch as pi_run_batch
+
+    pi_run_batch(input_dir, output_dir, use_ocr=use_ocr, debug=debug)
+
+
+MODES: dict[str, ModeConfig] = {
+    "export": ModeConfig(
+        help="Process export PDFs",
+        input_subdir="input_export",
+        run_batch=_run_export,
+    ),
+    "domestic": ModeConfig(
+        help="Process domestic PDFs (batches + SSCC)",
+        input_subdir="input_domestic",
+        run_batch=_run_domestic,
+    ),
+    "pi": ModeConfig(
+        help="Process PI / packing list PDFs",
+        input_subdir="input_pi",
+        run_batch=_run_pi,
+    ),
+}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Batch runner for all pipelines")
+    parser.add_argument("mode", choices=sorted(MODES.keys()))
+    parser.add_argument("--ocr", action="store_true", help="Enable OCR fallback")
+    parser.add_argument("--debug", action="store_true", help="Verbose debug logging")
+    args = parser.parse_args()
+
+    mode_cfg = MODES[args.mode]
+
+    input_dir = BASE_TEST_DIR / mode_cfg.input_subdir
+    output_dir = BASE_TEST_DIR / "output"
+
+    print(f"[{args.mode.upper()}] Input: {input_dir}")
+    print(f"[{args.mode.upper()}] Output dir: {output_dir}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    mode_cfg.run_batch(input_dir, output_dir, args.ocr, args.debug)
+
 
 if __name__ == "__main__":
     main()
