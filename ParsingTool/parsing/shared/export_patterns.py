@@ -16,8 +16,7 @@ from typing import Dict
 LINE = r"([^\n]+)"
 
 EXPORT_FIELD_PATTERNS: Dict[str, str] = {
-    # Optional name line
-    "Name": r"^\s*Name[:\s]+([^\n]+)$",
+
 
     # The PDF uses "Date" not always "Date Requested"
     "Date Requested": r"D[a@]te\s*(?:R[e3]qu[e3]st[e3]d)?[\s:.-]*([\d./-]+)",

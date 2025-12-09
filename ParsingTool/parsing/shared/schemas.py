@@ -30,7 +30,7 @@ SSCC_COLUMNS = [
 
 # Export pipeline (single-row CSV per PDF)
 EXPORT_COLUMNS = [
-    "Name",
+
     "Date Requested",
     "OLAM Ref Number",
     "Delivery Number",

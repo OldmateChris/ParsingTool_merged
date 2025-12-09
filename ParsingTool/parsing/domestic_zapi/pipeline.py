@@ -30,7 +30,8 @@ HEADER_PATTERNS = {
 BATCH_RE = re.compile(r"\b(F\d{6,})\b", re.IGNORECASE)
 PAL_RE = re.compile(r"\b(\d+)\s*PAL\b", re.IGNORECASE)
 SSCC_RE = re.compile(r"\b(?:[A-Za-z]+)?(\d{18,20})\b")  # 18-20 digits, optional prefix
-SIZE_RE = re.compile(r"\b(\d{2}/\d{2})\b")
+# Allow spaces like "30 / 32"
+SIZE_RE = re.compile(r"\b(\d{2}\s*/\s*\d{2})\b")
 
 # Packaging patterns to cover: "12.5KG ctn", "1T bag", "850KG D-Sp", etc.
 # We capture a number + unit (KG or T) plus an optional packaging word.
@@ -142,8 +143,10 @@ def _parse_batches_and_sscc(text: str) -> List[dict]:
                 continue
 
             # Keep lines that *look* like actual product descriptions.
-            # They must contain a size (e.g. 27/30) or a pack (e.g. 850KG, 1T, 25KG ctn).
-            if SIZE_RE.search(nxt) or PACK_RE.search(nxt):
+            # Robust match: Size, Pack, or explicit product keywords/labels
+            if (SIZE_RE.search(nxt) or 
+                PACK_RE.search(nxt) or 
+                re.search(r"\b(?:Alm|Almonds|Kern|NON VAR|Variety|Grade|Packaging)\b", nxt, re.IGNORECASE)):
                 product_lines.append(nxt)
 
         blocks.append({
@@ -228,6 +231,9 @@ def _parse_product_fields(product_lines: List[str]) -> dict:
         m_var = re.match(r"^\d+\s+(.*)$", variety)
         if m_var:
             variety = m_var.group(1)
+    else:
+        # Fallback: if no split point found, assume the whole line is Variety
+        variety = re.sub(r"\s+", " ", txt).strip()
 
     return {
         "Variety": variety,
