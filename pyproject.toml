@@ -5,25 +5,30 @@ description = "PDF-to-CSV parsing tool with optional OCR fallback"
 readme = "README.md"
 requires-python = ">=3.10"
 
+
 dependencies = [
-    "pandas",
-    "pymupdf",
-    "PyPDF2",
-    "pytesseract",
-    "pdf2image",
-    "Pillow",
+"pandas",
+"pymupdf",
+"PyPDF2",
+"pytesseract",
+"pdf2image",
+"Pillow",
 ]
+
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ParsingTool*"]
 
+
 [project.scripts]
 parsingtool = "ParsingTool.parsing.cli:main"
 parsingtool-gui = "ParsingTool.main:main"
+
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

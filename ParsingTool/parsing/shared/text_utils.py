@@ -46,7 +46,7 @@ def find_all(re_pat: str, text: str) -> List[str]:
 
 
 def lines(text: str) -> List[str]:
-    """Split text into a list of lines, preserving order.
+    r"""Split text into a list of lines, preserving order.
 
     Leading/trailing whitespace is left as-is so that regexes can
     decide what to trim using \s* where appropriate.

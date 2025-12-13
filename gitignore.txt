@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environments
+.venv/
+venv/
+.env
+.env.*
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Editors / IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project outputs (don’t upload generated files)
+output/
+*.csv
+qc_report.md
+
+# PDFs & heavy assets (avoid committing real docs)
+samples/*.pdf
+*.pdf
+
+# Pytest cache
+.pytest_cache/
